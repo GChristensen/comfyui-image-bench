@@ -672,6 +672,20 @@ async def media_thumb(request):
     return web.FileResponse(thumb_path, headers={"Content-Type": "image/jpeg", "Cache-Control": "max-age=86400"})
 
 
+@PromptServer.instance.routes.get(BASE_PATH + "/media/info")
+async def media_probe(request):
+    """Duration, frame rate, frame count and soundtrack of a video or audio file by its /view URL"""
+    path = resolve_view_path(request.query.get("url"))
+
+    if not path or media.media_kind(path) == "image" or not os.path.isfile(path):
+        return web.Response(text="Not a video or audio file", status=400)
+
+    try:
+        return web.json_response(await asyncio.to_thread(media.probe, path))
+    except media.MediaError as e:
+        return web.Response(text=str(e), status=404)
+
+
 @PromptServer.instance.routes.post(BASE_PATH + "/png_info")
 async def png_info(request):
     """Infotext and parameters of an uploaded image (PNG text, EXIF or comment)"""
@@ -682,6 +696,22 @@ async def png_info(request):
         return web.Response(text="No file provided", status=400)
 
     return web.json_response(pnginfo.image_info(await field.read()))
+
+
+@PromptServer.instance.routes.post(BASE_PATH + "/infotext")
+async def write_infotext(request):
+    """Write an infotext into a PNG image of the output or temp directory (Paste infotext of the image context menu)"""
+    data = await request.json()
+    path = resolve_view_path(data.get("imageUrl"))
+    roots = [folder_paths.get_output_directory(), folder_paths.get_temp_directory()]
+
+    if not path or not explore_export.is_allowed_image(path, roots):
+        return web.json_response({"error": "The image is not a file of the output directory."}, status=400)
+
+    try:
+        return web.json_response(await asyncio.to_thread(pnginfo.write_infotext, path, data.get("infotext") or ""))
+    except (ValueError, OSError) as e:
+        return web.json_response({"error": str(e)}, status=400)
 
 
 # WebSocket endpoint for real-time communication
